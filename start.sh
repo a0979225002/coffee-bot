@@ -1,12 +1,20 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
-# 如果已經在跑就不重複啟動
-if pgrep -f "python bot.py" > /dev/null; then
+if pgrep -f "bot.py" > /dev/null; then
     echo "Bot 已經在運行中"
-    exit 0
+    read -p "是否關閉？(Y/n) " choice
+    case "$choice" in
+        [Nn])
+            echo "維持運行"
+            ;;
+        *)
+            pkill -f "bot.py"
+            echo "Bot 已關閉"
+            ;;
+    esac
+else
+    source venv/bin/activate
+    nohup python bot.py > bot.log 2>&1 &
+    echo "Bot 已啟動"
 fi
-
-source venv/bin/activate
-nohup python bot.py > bot.log 2>&1 &
-echo "Bot 已啟動"
