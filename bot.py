@@ -24,6 +24,7 @@ if not CONFIG_FILE.exists():
 
 _config = json.loads(CONFIG_FILE.read_text())
 BOT_TOKEN = _config["BOT_TOKEN"]
+ACCESS_KEY = _config["ACCESS_KEY"]
 
 # Google Form 表單網址與欄位 ID（依你的表單調整）
 FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd0zY40JLXJsJjKh5Ri2BlE3SdrD0XqVWy0lTWnz_JrSOwO2w/formResponse"
@@ -50,7 +51,7 @@ BEANS = ["酸", "不酸"]
 TIMES = ["08:30", "09:00", "09:30", "10:00", "10:30"]
 
 # 對話狀態
-SET_NAME, CHOOSE_DRINK, CHOOSE_TEMP, CHOOSE_BEAN, CHOOSE_TIME, CONFIRM_OVERWRITE = range(6)
+VERIFY_KEY, SET_NAME, CHOOSE_DRINK, CHOOSE_TEMP, CHOOSE_BEAN, CHOOSE_TIME, CONFIRM_OVERWRITE = range(7)
 
 # 使用者資料存檔
 DATA_FILE = Path(__file__).parent / "users.json"
@@ -107,6 +108,11 @@ HELP_TEXT = (
 # --- Bot 指令 ---
 
 async def help_cmd(update: Update, context):
+    users = load_users()
+    uid = str(update.effective_user.id)
+    if uid not in users:
+        await update.message.reply_text("請先用 /start 註冊。")
+        return
     await update.message.reply_text(HELP_TEXT)
 
 
@@ -127,10 +133,22 @@ async def start(update: Update, context):
 
     await update.message.reply_text(
         "歡迎使用歐客佬咖啡訂購 Bot！\n\n"
+        "請輸入通關密碼："
+    )
+    return VERIFY_KEY
+
+
+async def verify_key(update: Update, context):
+    if update.message.text.strip() != ACCESS_KEY:
+        await update.message.reply_text("密碼錯誤，請重新輸入：")
+        return VERIFY_KEY
+
+    await update.message.reply_text(
+        "驗證成功！\n\n"
         "這個 Bot 可以幫你：\n"
         "1. 每天自動訂咖啡，不用再手動填表單\n"
         "2. 也可以臨時手動訂購或換口味\n\n"
-        "首先，請輸入你的英文名（用來填寫表單）："
+        "請輸入你的英文名（用來填寫表單）："
     )
     return SET_NAME
 
@@ -507,7 +525,9 @@ def main():
     # 註冊流程：/start
     start_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
-        states={SET_NAME: [
+        states={
+            VERIFY_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_key)],
+            SET_NAME: [
             CallbackQueryHandler(keep_name_callback, pattern=r"^keep_name:"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, set_name),
         ]},

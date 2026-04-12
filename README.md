@@ -41,10 +41,34 @@ coffee-bot/
 
 ### 1. 建立 Telegram Bot
 
-1. 在 Telegram 搜尋 `@BotFather`
-2. 輸入 `/newbot`，依指示取名並取得 **Bot Token**
+1. 下載 [Telegram](https://telegram.org/)（手機或電腦都可以）
+2. 在 Telegram 搜尋 `@BotFather`，點進去對話
+3. 輸入 `/newbot`
+4. BotFather 會問你 Bot 的**顯示名稱**，輸入你想要的名字（例如 `咖啡通知`）
+5. 再輸入 Bot 的 **username**，必須以 `_bot` 結尾（例如 `my_coffee_bot`）
+6. 建立成功後，BotFather 會給你一組 **Bot Token**，格式像 `123456789:ABCdefGHI...`，複製起來
 
-### 2. 設定專案
+### 2. 測試 Bot 能不能發訊息（選讀）
+
+Bot 程式寫好前，可以先手動測試 Bot 能不能發訊息給你：
+
+1. 在 Telegram 搜尋你剛建的 Bot，點進去按 **START**，傳一句 `hi`
+2. 在瀏覽器打開（把 `你的TOKEN` 換成你的 Bot Token）：
+   ```
+   https://api.telegram.org/bot你的TOKEN/getUpdates
+   ```
+3. 在回傳的 JSON 中找到 `"chat":{"id": 123456789}`，這就是你的 **Chat ID**
+4. 用以下指令測試發送訊息：
+   ```bash
+   curl -s -X POST "https://api.telegram.org/bot你的TOKEN/sendMessage" \
+     -H "Content-Type: application/json" \
+     -d '{"chat_id": 你的CHAT_ID, "text": "測試成功！"}'
+   ```
+5. Telegram 收到訊息就代表 Bot 設定正確
+
+> 注意：Bot 程式啟動 polling 後，`getUpdates` 會被程式佔用而拿不到結果。這步只適用於程式啟動前的測試。Bot 啟動後，使用者的 Chat ID 會在 `/start` 時由程式自動取得。
+
+### 3. 設定專案
 
 ```bash
 git clone <你的 repo 網址>
@@ -65,11 +89,12 @@ cp config.example.json config.json
 
 ```json
 {
-  "BOT_TOKEN": "你從 BotFather 拿到的 Token"
+  "BOT_TOKEN": "你從 BotFather 拿到的 Token",
+  "ACCESS_KEY": "自訂通關密碼，新使用者加入時需輸入"
 }
 ```
 
-### 3. 啟動
+### 4. 啟動
 
 ```bash
 source venv/bin/activate
@@ -82,7 +107,7 @@ python bot.py
 nohup python bot.py > bot.log 2>&1 &
 ```
 
-### 4. 開始使用
+### 5. 開始使用
 
 到 Telegram 找你的 Bot，輸入 `/start` 即可。
 
