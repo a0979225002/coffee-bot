@@ -101,11 +101,21 @@ HELP_TEXT = (
     "/who - 查看誰設了自動訂購\n"
     "/list - 查看所有使用者\n"
     "/cancel_auto - 取消自動訂購\n"
+    "/apikey - 查看API Key\n"
     "/help - 顯示此說明"
 )
 
 
 # --- Bot 指令 ---
+
+async def apikey_cmd(update: Update, context):
+    users = load_users()
+    uid = str(update.effective_user.id)
+    if uid not in users:
+        await update.message.reply_text("請先用 /start 註冊。")
+        return
+    await update.message.reply_text(f"API Key：\n`{ACCESS_KEY}`", parse_mode="Markdown")
+
 
 async def help_cmd(update: Update, context):
     users = load_users()
@@ -133,7 +143,7 @@ async def start(update: Update, context):
 
     await update.message.reply_text(
         "歡迎使用歐客佬咖啡訂購 Bot！\n\n"
-        "請輸入通關密碼："
+        "請輸入API Key："
     )
     return VERIFY_KEY
 
@@ -567,6 +577,7 @@ def main():
     app.add_handler(CommandHandler("who", who))
     app.add_handler(CommandHandler("list", list_all))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("apikey", apikey_cmd))
 
     # 把 scheduler 存到 bot_data 給 cancel_auto 用
     app.bot_data["scheduler"] = scheduler

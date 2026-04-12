@@ -90,7 +90,7 @@ cp config.example.json config.json
 ```json
 {
   "BOT_TOKEN": "你從 BotFather 拿到的 Token",
-  "ACCESS_KEY": "自訂通關密碼，新使用者加入時需輸入"
+  "ACCESS_KEY": "自訂 API Key，新使用者加入時需輸入"
 }
 ```
 
