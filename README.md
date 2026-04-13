@@ -85,8 +85,9 @@ Bot 程式寫好前，可以先手動測試 Bot 能不能發訊息給你：
 git clone <你的 repo 網址>
 cd coffee-bot
 
-# 建立虛擬環境
+# 建立虛擬環境（讓套件裝在專案裡，不影響系統）
 python3 -m venv venv
+# 啟動虛擬環境（讓之後的 pip / python3 指向 venv 裡的版本）
 source venv/bin/activate
 
 # 安裝套件
