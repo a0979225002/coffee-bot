@@ -2,4 +2,5 @@ venv/
 bot.log
 users.json
 config.json
+cookies.json
 __pycache__/

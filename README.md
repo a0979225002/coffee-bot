@@ -8,24 +8,34 @@ Telegram Bot 自動訂購咖啡，搭配 Google Form 表單提交。
 
 | 指令 | 說明 |
 |------|------|
-| `/start` | 註冊 / 修改英文名 |
+| `/start` | 新使用者註冊（需輸入 API Key） |
 | `/order` | 手動訂咖啡（選飲品 → 冰熱 → 豆子） |
-| `/auto` | 設定每日自動訂購（含時間） |
+| `/auto` | 設定每日自動訂購（含時間，08:30~10:30） |
 | `/skip` | 今天跳過自動訂購，明天恢復 |
 | `/status` | 查看個人設定 |
 | `/who` | 查看誰設了自動訂購 |
 | `/list` | 查看所有使用者 |
+| `/apikey` | 查看自己的 API Key |
 | `/cancel_auto` | 取消自動訂購 |
 | `/help` | 顯示所有指令 |
+
+## 安全機制
+
+- 新使用者加入需輸入 **API Key** 驗證
+- 每次有新使用者註冊成功後，API Key 會自動更換，舊的立即失效
+- 每位使用者的 API Key 會個別保存，可透過 `/apikey` 查看自己的
+- 管理者可透過 `start.sh` 查看當前最新的 API Key，提供給下一位加入的人
 
 ## 架構
 
 ```
 coffee-bot/
 ├── bot.py              # 主程式
-├── config.json         # Bot Token（不上傳）
+├── config.json         # Bot Token + API Key（不上傳）
 ├── config.example.json # config 範本
 ├── users.json          # 使用者資料（自動產生，不上傳）
+├── start.sh            # 啟動/管理腳本
+├── login.py            # Google 登入工具（表單需登入時使用）
 ├── requirements.txt    # Python 套件
 └── .gitignore
 ```
@@ -35,7 +45,8 @@ coffee-bot/
 - **python-telegram-bot** — Telegram Bot API 的 Python 封裝
 - **APScheduler** — 排程器，用來定時自動訂購
 - **requests** — HTTP 請求，用來提交 Google Form
-- **Google Form** — 透過 POST 請求直接提交表單
+- **browser-cookie3** — 讀取 Chrome 瀏覽器的 Google 登入 cookie
+- **Google Form** — 透過 POST 請求直接提交表單，自動解析 entry ID
 
 ## 快速開始
 
@@ -85,31 +96,30 @@ pip install -r requirements.txt
 cp config.example.json config.json
 ```
 
-編輯 `config.json`，填入你的 Bot Token：
+編輯 `config.json`：
 
 ```json
 {
   "BOT_TOKEN": "你從 BotFather 拿到的 Token",
-  "ACCESS_KEY": "自訂 API Key，新使用者加入時需輸入"
+  "ACCESS_KEY": "自訂 API Key（建議用 UUID，例如 python3 -c \"import uuid; print(uuid.uuid4())\"）"
 }
 ```
 
 ### 4. 啟動
 
 ```bash
-source venv/bin/activate
-python bot.py
+bash start.sh
 ```
 
-背景執行：
+`start.sh` 功能：
+- Bot 沒在跑 → 自動啟動
+- Bot 已在跑 → 顯示選單：關閉 Bot / 查看 API Key / 離開
 
-```bash
-nohup python bot.py > bot.log 2>&1 &
-```
+> macOS 使用者：雙擊如果打開文字編輯器，右鍵 → 打開檔案的應用程式 → 選**終端機**。
 
 ### 5. 開始使用
 
-到 Telegram 找你的 Bot，輸入 `/start` 即可。
+到 Telegram 找你的 Bot，按 START，輸入 API Key 後設定英文名即可。
 
 ## 學習重點
 
@@ -117,9 +127,11 @@ nohup python bot.py > bot.log 2>&1 &
 
 1. **Telegram Bot API** — 如何建立互動式 Bot，使用 InlineKeyboard 做選單
 2. **ConversationHandler** — 多步驟對話流程（選飲品 → 選冰熱 → 選豆子 → 選時間）
-3. **Google Form 自動提交** — 透過分析表單 HTML 取得 entry ID，用 POST 請求提交
+3. **Google Form 自動提交** — 動態解析表單 HTML 取得 entry ID，支援表單欄位變更
 4. **APScheduler 排程** — 定時執行任務，支援每個使用者不同時間
 5. **JSON 檔案儲存** — 簡單的使用者資料持久化
+6. **API Key 驗證** — 一次性 Key 機制，註冊後自動換新
+7. **browser-cookie3** — 讀取瀏覽器 cookie 解決需要登入的表單
 
 ## 如何找到 Google Form 的 entry ID
 
@@ -128,22 +140,11 @@ nohup python bot.py > bot.log 2>&1 &
 3. 搜尋 `entry.`，每個欄位都有一組 `entry.數字` 的 ID
 4. 把找到的 ID 替換到 `bot.py` 中對應的變數
 
-## 快速啟動腳本
-
-專案附有 `start.sh`，在專案目錄下執行即可啟動 Bot：
-
-```bash
-cd coffee-bot
-bash start.sh
-```
-
-- Bot 沒在跑 → 自動啟動
-- Bot 已在跑 → 提示是否關閉
-
-> macOS 使用者：雙擊如果打開文字編輯器，右鍵 → 打開檔案的應用程式 → 選**終端機**。
+> 本專案已支援自動解析 entry ID，表單欄位變更時不需手動更新。
 
 ## 注意事項
 
 - Bot 需要一直運行才會執行排程（電腦不能關機或休眠）
+- 如果表單需要 Google 登入，需在運行 Bot 的電腦上用 Chrome 登入 Google 帳號
 - `config.json` 和 `users.json` 不會上傳到 Git
-- 如果表單連結會更換，需要手動更新 `bot.py` 中的 `FORM_URL`
+- 如果表單網址更換，需要手動更新 `bot.py` 中的 `FORM_BASE`

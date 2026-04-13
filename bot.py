@@ -1,10 +1,13 @@
 import json
 import os
+import re
+import uuid
 import logging
 from datetime import date
 from pathlib import Path
 
 import requests
+import browser_cookie3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -26,13 +29,32 @@ _config = json.loads(CONFIG_FILE.read_text())
 BOT_TOKEN = _config["BOT_TOKEN"]
 ACCESS_KEY = _config["ACCESS_KEY"]
 
-# Google Form 表單網址與欄位 ID（依你的表單調整）
-FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd0zY40JLXJsJjKh5Ri2BlE3SdrD0XqVWy0lTWnz_JrSOwO2w/formResponse"
-ENTRY_NAME = "entry.453017699"       # 英文名
-ENTRY_DRINK = "entry.929171591"      # 飲品選擇
-ENTRY_TEMP = "entry.324546308"       # 冰的/熱的
-ENTRY_BEAN = "entry.1689470523"      # 咖啡豆喜好
-ENTRY_NOTE = "entry.1443756478"      # 備註
+
+def regenerate_api_key() -> str:
+    """產生新的 API Key 並存入 config.json"""
+    global ACCESS_KEY
+    new_key = str(uuid.uuid4())
+    ACCESS_KEY = new_key
+    _config["ACCESS_KEY"] = new_key
+    CONFIG_FILE.write_text(json.dumps(_config, ensure_ascii=False, indent=2))
+    return new_key
+
+# Google Form 表單網址
+FORM_BASE = "https://docs.google.com/forms/d/e/1FAIpQLSd0zY40JLXJsJjKh5Ri2BlE3SdrD0XqVWy0lTWnz_JrSOwO2w"
+FORM_VIEW_URL = f"{FORM_BASE}/viewform"
+FORM_SUBMIT_URL = f"{FORM_BASE}/formResponse"
+
+
+def get_chrome_session():
+    """建立帶有 Chrome cookie 的 requests Session"""
+    cj = browser_cookie3.chrome(domain_name='.google.com')
+    s = requests.Session()
+    for c in cj:
+        s.cookies.set_cookie(c)
+    s.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    })
+    return s
 
 # 飲品選單
 DRINKS = [
@@ -75,21 +97,75 @@ def save_users(users: dict):
     DATA_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2))
 
 
-def submit_form(name: str, drink: str, temp: str, bean: str, note: str = "") -> bool:
-    """提交 Google Form"""
-    data = {
-        ENTRY_NAME: name,
-        ENTRY_DRINK: drink,
-        ENTRY_TEMP: temp,
-        ENTRY_BEAN: bean,
-        ENTRY_NOTE: note,
-    }
+def submit_form(name: str, drink: str, temp: str, bean: str, note: str = "") -> tuple[bool, str]:
+    """提交 Google Form，回傳 (成功與否, 訊息)"""
     try:
-        r = requests.post(FORM_URL, data=data, timeout=10)
-        return r.status_code == 200
+        s = get_chrome_session()
     except Exception as e:
-        logger.error(f"提交表單失敗: {e}")
-        return False
+        logger.error(f"無法讀取 Chrome cookie: {e}")
+        return False, "無法讀取 Chrome cookie，請確認 Chrome 已登入 Google"
+
+    try:
+        r = s.get(FORM_VIEW_URL, timeout=10)
+    except Exception as e:
+        logger.error(f"無法載入表單頁面: {e}")
+        return False, "無法連線到 Google Form"
+
+    if "登入" in r.text and "英文名" not in r.text:
+        return False, "Google 登入已過期，請重新在 Chrome 登入 Google 帳號"
+
+    # 從頁面抓取隱藏欄位
+    fbzx_match = re.findall(r'name="fbzx" value="([^"]+)"', r.text)
+    if not fbzx_match:
+        return False, "無法解析表單（找不到 fbzx）"
+    fbzx = fbzx_match[0]
+
+    # 抓取 sentinel entry ID（選擇題）
+    sentinel_ids = re.findall(r'entry\.(\d+)_sentinel', r.text)
+    # 抓取所有 entry ID（含文字欄位）
+    all_ids = re.findall(r'\[(\d{6,10}),"', r.text)
+    seen = set()
+    text_ids = []
+    for m in all_ids:
+        if m not in seen and m not in sentinel_ids:
+            seen.add(m)
+            text_ids.append(m)
+
+    if len(sentinel_ids) < 3 or len(text_ids) < 2:
+        return False, f"表單欄位數量不符（文字欄位:{len(text_ids)}, 選擇欄位:{len(sentinel_ids)}）"
+
+    # 組合提交資料
+    # 文字欄位：英文名、備註
+    # 選擇欄位：飲品、冰熱、咖啡豆
+    data = {
+        f'entry.{text_ids[0]}': name,
+        f'entry.{sentinel_ids[0]}': drink,
+        f'entry.{sentinel_ids[1]}': temp,
+        f'entry.{sentinel_ids[2]}': bean,
+        f'entry.{text_ids[1]}': note,
+        f'entry.{sentinel_ids[0]}_sentinel': '',
+        f'entry.{sentinel_ids[1]}_sentinel': '',
+        f'entry.{sentinel_ids[2]}_sentinel': '',
+        'fvv': '1',
+        'pageHistory': '0',
+        'fbzx': fbzx,
+    }
+
+    try:
+        r2 = s.post(FORM_SUBMIT_URL, data=data, headers={'Referer': FORM_VIEW_URL}, timeout=10)
+    except Exception as e:
+        logger.error(f"提交請求失敗: {e}")
+        return False, "網路錯誤，無法提交表單"
+
+    if r2.status_code == 400:
+        return False, "表單拒絕提交（400），可能欄位格式有誤"
+    if r2.status_code != 200:
+        return False, f"表單回傳錯誤（HTTP {r2.status_code}）"
+
+    if "回覆" in r2.text or "recorded" in r2.text.lower():
+        return True, "提交成功"
+
+    return False, "提交後未收到確認，請到表單頁面確認是否成功"
 
 
 HELP_TEXT = (
@@ -114,7 +190,8 @@ async def apikey_cmd(update: Update, context):
     if uid not in users:
         await update.message.reply_text("請先用 /start 註冊。")
         return
-    await update.message.reply_text(f"API Key：\n`{ACCESS_KEY}`", parse_mode="Markdown")
+    my_key = users[uid].get("api_key", "未記錄")
+    await update.message.reply_text(f"你的 API Key：\n`{my_key}`", parse_mode="Markdown")
 
 
 async def help_cmd(update: Update, context):
@@ -130,28 +207,27 @@ async def start(update: Update, context):
     users = load_users()
     uid = str(update.effective_user.id)
     if uid in users:
-        name = users[uid]['name']
-        keyboard = [
-            [InlineKeyboardButton(f"維持 {name}", callback_data="keep_name:yes"),
-             InlineKeyboardButton("改名", callback_data="keep_name:no")],
-        ]
-        await update.message.reply_text(
-            f"嗨 {name}！名字正確嗎?",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-        return SET_NAME
+        await update.message.reply_text(f"嗨 {users[uid]['name']}！輸入 /help 查看所有指令。")
+        return ConversationHandler.END
 
     await update.message.reply_text(
         "歡迎使用歐客佬咖啡訂購 Bot！\n\n"
-        "請輸入API Key："
+        "請輸入 API Key："
     )
     return VERIFY_KEY
 
 
 async def verify_key(update: Update, context):
     if update.message.text.strip() != ACCESS_KEY:
-        await update.message.reply_text("密碼錯誤，請重新輸入：")
+        await update.message.reply_text("API Key 錯誤，請重新輸入：")
         return VERIFY_KEY
+
+    # 暫存這組 Key 給 set_name 用
+    context.user_data["registered_key"] = ACCESS_KEY
+
+    # 驗證成功後立刻換新 Key，舊的就失效了
+    new_key = regenerate_api_key()
+    logger.info(f"API Key 已更新：{new_key}")
 
     await update.message.reply_text(
         "驗證成功！\n\n"
@@ -163,24 +239,12 @@ async def verify_key(update: Update, context):
     return SET_NAME
 
 
-async def keep_name_callback(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    choice = query.data.replace("keep_name:", "")
-
-    if choice == "yes":
-        await query.edit_message_text(HELP_TEXT)
-        return ConversationHandler.END
-
-    await query.edit_message_text("請輸入新的英文名：")
-    return SET_NAME
-
 
 async def set_name(update: Update, context):
     users = load_users()
     uid = str(update.effective_user.id)
     name = update.message.text.strip()
-    users[uid] = {"name": name, "auto": None}
+    users[uid] = {"name": name, "auto": None, "api_key": context.user_data.get("registered_key", "")}
     save_users(users)
     await update.message.reply_text(
         f"設定完成！{name}\n\n"
@@ -224,11 +288,11 @@ async def choose_drink(update: Update, context):
         uid = str(query.from_user.id)
         users = load_users()
         name = users[uid]["name"]
-        ok = submit_form(name, "Pass", "冰的", "")
+        ok, msg = submit_form(name, "Pass", "冰的", "")
         if ok:
             await query.edit_message_text("好的，今天 Pass ☕")
         else:
-            await query.edit_message_text("提交失敗，請稍後再試。")
+            await query.edit_message_text(f"提交失敗：{msg}")
         return ConversationHandler.END
 
     keyboard = [
@@ -264,11 +328,11 @@ async def choose_bean(update: Update, context):
     drink = context.user_data["drink"]
     temp = context.user_data["temp"]
 
-    ok = submit_form(name, drink, temp, bean)
+    ok, msg = submit_form(name, drink, temp, bean)
     if ok:
         await query.edit_message_text(f"已訂購！\n☕ {drink}\n🧊 {temp}\n🫘 {bean}")
     else:
-        await query.edit_message_text("提交失敗，請稍後再試。")
+        await query.edit_message_text(f"提交失敗：{msg}")
     return ConversationHandler.END
 
 
@@ -488,12 +552,11 @@ async def auto_order_for_user(uid: str, bot):
         return
 
     a = user["auto"]
-    ok = submit_form(user["name"], a["drink"], a["temp"], a["bean"])
-    msg = (
-        f"已自動訂購！\n☕ {a['drink']} / {a['temp']} / {a['bean']}"
-        if ok
-        else "自動訂購失敗，請手動用 /order 訂購。"
-    )
+    ok, err = submit_form(user["name"], a["drink"], a["temp"], a["bean"])
+    if ok:
+        msg = f"已自動訂購！\n☕ {a['drink']} / {a['temp']} / {a['bean']}"
+    else:
+        msg = f"自動訂購失敗：{err}\n請手動用 /order 訂購。"
     try:
         await bot.send_message(chat_id=int(uid), text=msg)
     except Exception as e:
@@ -537,10 +600,8 @@ def main():
         entry_points=[CommandHandler("start", start)],
         states={
             VERIFY_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_key)],
-            SET_NAME: [
-            CallbackQueryHandler(keep_name_callback, pattern=r"^keep_name:"),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, set_name),
-        ]},
+            SET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name)],
+        },
         fallbacks=[],
     )
 
