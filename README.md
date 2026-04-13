@@ -92,16 +92,16 @@ source venv/bin/activate
 # 安裝套件
 pip install -r requirements.txt
 
-# 建立設定檔
-cp config.example.json config.json
+# 建立設定檔（自動生成 API Key）
+python3 -c "import json,uuid; json.dump({'BOT_TOKEN':'你的TOKEN','ACCESS_KEY':str(uuid.uuid4())},open('config.json','w'),indent=2)"
 ```
 
-編輯 `config.json`：
+編輯 `config.json`，把 `BOT_TOKEN` 換成你的（API Key 已自動生成）：
 
 ```json
 {
   "BOT_TOKEN": "你從 BotFather 拿到的 Token",
-  "ACCESS_KEY": "自訂 API Key（建議用 UUID，例如 python3 -c \"import uuid; print(uuid.uuid4())\"）"
+  "ACCESS_KEY": "（自動生成，不用改）"
 }
 ```
 

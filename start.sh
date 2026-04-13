@@ -1,6 +1,14 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
+# 如果 config.json 不存在，自動建立並生成 API Key
+if [ ! -f config.json ]; then
+    python3 -c "import json,uuid; json.dump({'BOT_TOKEN':'你的TOKEN','ACCESS_KEY':str(uuid.uuid4())},open('config.json','w'),indent=2)"
+    echo "已自動建立 config.json（含 API Key）"
+    echo "請先編輯 config.json 填入你的 Bot Token，再重新執行"
+    exit 0
+fi
+
 if pgrep -f "bot.py" > /dev/null; then
     while true; do
         echo ""
