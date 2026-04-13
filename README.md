@@ -92,7 +92,7 @@ source venv/bin/activate
 # 安裝套件
 pip install -r requirements.txt
 
-# 自動生成專案開啟前所有配置（包括第一次的 API Key）
+# 自動生成專案開啟前所有必要配置（包括第一次的 API Key）
 python3 -c "import json,uuid; json.dump({'BOT_TOKEN':'你的TOKEN','ACCESS_KEY':str(uuid.uuid4())},open('config.json','w'),indent=2)"
 ```
 
