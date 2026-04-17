@@ -17,6 +17,7 @@ Telegram Bot 自動訂購咖啡，搭配 Google Form 表單提交。
 | `/list` | 查看所有使用者 |
 | `/apikey` | 查看自己的 API Key |
 | `/cancel_auto` | 取消自動訂購 |
+| `/cancel` | 取消當前操作（流程卡住時使用） |
 | `/help` | 顯示所有指令 |
 
 ## 安全機制

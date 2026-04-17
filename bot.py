@@ -120,36 +120,44 @@ def submit_form(name: str, drink: str, temp: str, bean: str, note: str = "") -> 
         return False, "無法解析表單（找不到 fbzx）"
     fbzx = fbzx_match[0]
 
-    # 抓取 sentinel entry ID（選擇題）
-    sentinel_ids = re.findall(r'entry\.(\d+)_sentinel', r.text)
-    # 抓取所有 entry ID（含文字欄位）
-    all_ids = re.findall(r'\[(\d{6,10}),"', r.text)
-    seen = set()
-    text_ids = []
-    for m in all_ids:
-        if m not in seen and m not in sentinel_ids:
-            seen.add(m)
-            text_ids.append(m)
+    # 從 data-params 解析欄位結構
+    # 格式：%.@.[問題ID,"標題",null,類型,[[子欄位ID,...]]]
+    # 類型 0 = 文字輸入，類型 2 = 單選（radio）
+    field_blocks = re.findall(r'data-params="(%.@\.[^"]+)"', r.text)
+    text_fields = []   # (子欄位ID) 文字輸入
+    radio_fields = []  # (子欄位ID) 單選
+    for block in field_blocks:
+        block = block.replace('&quot;', '"').replace('&amp;', '&')
+        # 取得欄位類型：null,0 = 文字, null,2 = 單選
+        type_match = re.search(r',null,(\d+),\[\[(\d+)', block)
+        if type_match:
+            field_type = int(type_match.group(1))
+            sub_id = type_match.group(2)
+            if field_type == 0:
+                text_fields.append(sub_id)
+            elif field_type == 2:
+                radio_fields.append(sub_id)
 
-    if len(sentinel_ids) < 3 or len(text_ids) < 2:
-        return False, f"表單欄位數量不符（文字欄位:{len(text_ids)}, 選擇欄位:{len(sentinel_ids)}）"
+    if len(radio_fields) < 3 or len(text_fields) < 1:
+        return False, f"表單欄位數量不符（文字:{len(text_fields)}, 單選:{len(radio_fields)}）"
 
     # 組合提交資料
-    # 文字欄位：英文名、備註
-    # 選擇欄位：飲品、冰熱、咖啡豆
+    # 文字欄位：[0]=英文名, [1]=備註（若有）
+    # 單選欄位：[0]=飲品, [1]=冰熱, [2]=咖啡豆
     data = {
-        f'entry.{text_ids[0]}': name,
-        f'entry.{sentinel_ids[0]}': drink,
-        f'entry.{sentinel_ids[1]}': temp,
-        f'entry.{sentinel_ids[2]}': bean,
-        f'entry.{text_ids[1]}': note,
-        f'entry.{sentinel_ids[0]}_sentinel': '',
-        f'entry.{sentinel_ids[1]}_sentinel': '',
-        f'entry.{sentinel_ids[2]}_sentinel': '',
+        f'entry.{text_fields[0]}': name,
+        f'entry.{radio_fields[0]}': drink,
+        f'entry.{radio_fields[0]}_sentinel': '',
+        f'entry.{radio_fields[1]}': temp,
+        f'entry.{radio_fields[1]}_sentinel': '',
+        f'entry.{radio_fields[2]}': bean,
+        f'entry.{radio_fields[2]}_sentinel': '',
         'fvv': '1',
         'pageHistory': '0',
         'fbzx': fbzx,
     }
+    if len(text_fields) > 1:
+        data[f'entry.{text_fields[1]}'] = note
 
     try:
         r2 = s.post(FORM_SUBMIT_URL, data=data, headers={'Referer': FORM_VIEW_URL}, timeout=10)
@@ -158,13 +166,17 @@ def submit_form(name: str, drink: str, temp: str, bean: str, note: str = "") -> 
         return False, "網路錯誤，無法提交表單"
 
     if r2.status_code == 400:
+        logger.warning(f"[提交失敗] {name} | {drink}/{temp}/{bean} | HTTP 400")
         return False, "表單拒絕提交（400），可能欄位格式有誤"
     if r2.status_code != 200:
+        logger.warning(f"[提交失敗] {name} | {drink}/{temp}/{bean} | HTTP {r2.status_code}")
         return False, f"表單回傳錯誤（HTTP {r2.status_code}）"
 
     if "回覆" in r2.text or "recorded" in r2.text.lower():
+        logger.info(f"[提交成功] {name} | {drink}/{temp}/{bean}")
         return True, "提交成功"
 
+    logger.warning(f"[提交未確認] {name} | {drink}/{temp}/{bean} | 回應中無確認關鍵字")
     return False, "提交後未收到確認，請到表單頁面確認是否成功"
 
 
@@ -177,6 +189,7 @@ HELP_TEXT = (
     "/who - 查看誰設了自動訂購\n"
     "/list - 查看所有使用者\n"
     "/cancel_auto - 取消自動訂購\n"
+    "/cancel - 取消當前操作（流程卡住時使用）\n"
     "/apikey - 查看API Key\n"
     "/help - 顯示此說明"
 )
@@ -595,6 +608,13 @@ scheduler = AsyncIOScheduler(timezone="Asia/Taipei")
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # 取消對話指令
+    async def cancel(update: Update, context):
+        await update.message.reply_text("已取消。")
+        return ConversationHandler.END
+
+    cancel_handler = CommandHandler("cancel", cancel)
+
     # 註冊流程：/start
     start_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -602,7 +622,8 @@ def main():
             VERIFY_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_key)],
             SET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name)],
         },
-        fallbacks=[],
+        fallbacks=[cancel_handler],
+        conversation_timeout=300,
     )
 
     # 手動訂購流程：/order
@@ -613,7 +634,8 @@ def main():
             CHOOSE_TEMP: [CallbackQueryHandler(choose_temp, pattern=r"^temp:")],
             CHOOSE_BEAN: [CallbackQueryHandler(choose_bean, pattern=r"^bean:")],
         },
-        fallbacks=[],
+        fallbacks=[cancel_handler],
+        conversation_timeout=300,
     )
 
     # 自動訂購設定流程：/auto
@@ -626,7 +648,8 @@ def main():
             CHOOSE_BEAN: [CallbackQueryHandler(auto_choose_bean, pattern=r"^auto_bean:")],
             CHOOSE_TIME: [CallbackQueryHandler(auto_choose_time, pattern=r"^auto_time:")],
         },
-        fallbacks=[],
+        fallbacks=[cancel_handler],
+        conversation_timeout=300,
     )
 
     app.add_handler(start_handler)
@@ -640,6 +663,11 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("apikey", apikey_cmd))
 
+    async def error_handler(update, context):
+        logger.error(f"發生錯誤: {context.error}")
+
+    app.add_error_handler(error_handler)
+
     # 把 scheduler 存到 bot_data 給 cancel_auto 用
     app.bot_data["scheduler"] = scheduler
 
@@ -650,6 +678,24 @@ def main():
             update_user_schedule(uid, user, app.bot)
 
     scheduler.start()
+
+    # 設定 Telegram 指令選單
+    async def post_init(application):
+        from telegram import BotCommand
+        await application.bot.set_my_commands([
+            BotCommand("order", "手動訂咖啡"),
+            BotCommand("auto", "設定每日自動訂購"),
+            BotCommand("skip", "今天跳過自動訂購"),
+            BotCommand("status", "查看你的設定"),
+            BotCommand("who", "查看誰設了自動訂購"),
+            BotCommand("list", "查看所有使用者"),
+            BotCommand("cancel_auto", "取消自動訂購"),
+            BotCommand("cancel", "取消當前操作"),
+            BotCommand("apikey", "查看API Key"),
+            BotCommand("help", "顯示所有指令"),
+        ])
+
+    app.post_init = post_init
 
     logger.info("Bot 啟動中...")
     app.run_polling()
