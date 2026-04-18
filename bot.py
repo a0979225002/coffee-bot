@@ -188,7 +188,6 @@ HELP_TEXT = (
     "/who - 查看誰設了自動訂購\n"
     "/list - 查看所有使用者\n"
     "/cancel_auto - 取消自動訂購\n"
-    "/cancel - 取消當前操作（流程卡住時使用）\n"
     "/apikey - 查看API Key\n"
     "/help - 顯示此說明"
 )
@@ -695,13 +694,6 @@ scheduler = AsyncIOScheduler(timezone="Asia/Taipei")
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # 取消對話指令
-    async def cancel(update: Update, context):
-        await update.message.reply_text("已取消。")
-        return ConversationHandler.END
-
-    cancel_handler = CommandHandler("cancel", cancel)
-
     # 註冊流程：/start
     start_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -709,8 +701,9 @@ def main():
             VERIFY_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_key)],
             SET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name)],
         },
-        fallbacks=[cancel_handler],
-        conversation_timeout=300,
+        fallbacks=[],
+        allow_reentry=True,
+        conversation_timeout=120,
     )
 
     # 手動訂購流程：/order
@@ -721,8 +714,9 @@ def main():
             CHOOSE_TEMP: [CallbackQueryHandler(choose_temp, pattern=r"^temp:")],
             CHOOSE_BEAN: [CallbackQueryHandler(choose_bean, pattern=r"^bean:")],
         },
-        fallbacks=[cancel_handler],
-        conversation_timeout=300,
+        fallbacks=[],
+        allow_reentry=True,
+        conversation_timeout=120,
     )
 
     # 自動訂購設定流程：/auto
@@ -735,8 +729,9 @@ def main():
             CHOOSE_BEAN: [CallbackQueryHandler(auto_choose_bean, pattern=r"^auto_bean:")],
             CHOOSE_TIME: [CallbackQueryHandler(auto_choose_time, pattern=r"^auto_time:")],
         },
-        fallbacks=[cancel_handler],
-        conversation_timeout=300,
+        fallbacks=[],
+        allow_reentry=True,
+        conversation_timeout=120,
     )
 
     app.add_handler(start_handler)
@@ -778,7 +773,6 @@ def main():
             BotCommand("who", "查看誰設了自動訂購"),
             BotCommand("list", "查看所有使用者"),
             BotCommand("cancel_auto", "取消自動訂購"),
-            BotCommand("cancel", "取消當前操作"),
             BotCommand("apikey", "查看API Key"),
             BotCommand("help", "顯示所有指令"),
         ])
