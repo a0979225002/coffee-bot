@@ -496,6 +496,7 @@ async def skip_cmd(update: Update, context):
         if d.isoformat() in user_skips:
             label += " (已跳過)"
         buttons.append([InlineKeyboardButton(label, callback_data=f"skip:{d.isoformat()}")])
+    buttons.append([InlineKeyboardButton("完成", callback_data="skip:done")])
 
     # 已跳過的日期提示
     skipped = sorted([s for s in user_skips if s >= date.today().isoformat()])
@@ -517,6 +518,21 @@ async def skip_toggle(update: Update, context):
     await query.answer()
     uid = str(query.from_user.id)
     target_date = query.data.split(":", 1)[1]
+
+    if target_date == "done":
+        user_skips = skip_dates.get(uid, set())
+        skipped = sorted([s for s in user_skips if s >= date.today().isoformat()])
+        if skipped:
+            from datetime import date as dt
+            skip_list = ", ".join(
+                f"週{WEEKDAY_NAMES[dt.fromisoformat(s).weekday()]} {dt.fromisoformat(s).month}/{dt.fromisoformat(s).day}"
+                for s in skipped
+            )
+            text = f"設定完成！已跳過：{skip_list}"
+        else:
+            text = "目前沒有跳過任何日期。"
+        await query.edit_message_text(text)
+        return
 
     if uid not in skip_dates:
         skip_dates[uid] = set()
@@ -541,6 +557,7 @@ async def skip_toggle(update: Update, context):
         if wd.isoformat() in user_skips:
             label += " (已跳過)"
         buttons.append([InlineKeyboardButton(label, callback_data=f"skip:{wd.isoformat()}")])
+    buttons.append([InlineKeyboardButton("完成", callback_data="skip:done")])
 
     skipped = sorted([s for s in user_skips if s >= date.today().isoformat()])
     if skipped:
