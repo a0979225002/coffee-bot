@@ -30,7 +30,18 @@ Telegram Bot 自動訂購咖啡，搭配 Google Form 表單提交。
 
 ```
 coffee-bot/
-├── bot.py              # 主程式
+├── bot.py              # 主程式入口（組裝 handlers 和啟動）
+├── config.py           # 設定、常數、Logger
+├── storage.py          # 使用者資料讀寫
+├── form.py             # Google Form 提交邏輯
+├── scheduler.py        # 排程（自動訂購、跳過日期）
+├── handlers/           # 指令處理
+│   ├── __init__.py
+│   ├── start.py        # /start 註冊流程
+│   ├── order.py        # /order 手動訂購
+│   ├── auto.py         # /auto 自動訂購設定 + /cancel_auto
+│   ├── skip.py         # /skip 跳過日期選擇
+│   └── info.py         # /status /who /list /help /apikey
 ├── config.json         # Bot Token + API Key（不上傳）
 ├── config.example.json # config 範本
 ├── users.json          # 使用者資料（自動產生，不上傳）
