@@ -1,22 +1,38 @@
 from datetime import date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import logger
-from storage import load_users
+from storage import load_users, save_users
 from form import submit_form
 
 # 全域 scheduler
 scheduler = AsyncIOScheduler(timezone="Asia/Taipei")
 
-# 跳過日期：{uid: set of "YYYY-MM-DD"}
-skip_dates: dict[str, set[str]] = {}
+
+def get_skip_dates(uid: str) -> set:
+    """從 users.json 讀取某使用者的跳過日期"""
+    users = load_users()
+    user = users.get(uid, {})
+    return set(user.get("skip_dates", []))
+
+
+def save_skip_dates(uid: str, dates: set):
+    """將跳過日期存入 users.json"""
+    users = load_users()
+    if uid in users:
+        # 只保留今天及之後的日期
+        today = date.today().isoformat()
+        users[uid]["skip_dates"] = sorted([d for d in dates if d >= today])
+        save_users(users)
 
 
 async def auto_order_for_user(uid: str, bot):
     """幫單一使用者自動訂咖啡"""
     today = date.today().isoformat()
+    skip = get_skip_dates(uid)
 
-    if uid in skip_dates and today in skip_dates[uid]:
-        skip_dates[uid].discard(today)
+    if today in skip:
+        skip.discard(today)
+        save_skip_dates(uid, skip)
         try:
             await bot.send_message(chat_id=int(uid), text="今天已跳過自動訂購。")
         except Exception:

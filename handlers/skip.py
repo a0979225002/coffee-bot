@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from config import WEEKDAY_NAMES
-from scheduler import skip_dates
+from scheduler import get_skip_dates, save_skip_dates
 
 
 def get_next_workdays(count=5):
@@ -41,7 +41,7 @@ def _skip_summary(user_skips):
 
 async def skip_cmd(update: Update, context):
     uid = str(update.effective_user.id)
-    user_skips = skip_dates.get(uid, set())
+    user_skips = get_skip_dates(uid)
     buttons = _build_skip_buttons(user_skips)
 
     summary = _skip_summary(user_skips)
@@ -61,7 +61,7 @@ async def skip_toggle(update: Update, context):
 
     # 按「完成」
     if target_date == "done":
-        user_skips = skip_dates.get(uid, set())
+        user_skips = get_skip_dates(uid)
         summary = _skip_summary(user_skips)
         if summary:
             text = f"設定完成！已跳過：{summary}"
@@ -71,21 +71,21 @@ async def skip_toggle(update: Update, context):
         return
 
     # 切換跳過/恢復
-    if uid not in skip_dates:
-        skip_dates[uid] = set()
-
+    user_skips = get_skip_dates(uid)
     d = date.fromisoformat(target_date)
     day_label = f"週{WEEKDAY_NAMES[d.weekday()]} {d.month}/{d.day}"
 
-    if target_date in skip_dates[uid]:
-        skip_dates[uid].remove(target_date)
+    if target_date in user_skips:
+        user_skips.discard(target_date)
         action = f"已恢復 {day_label} 的自動訂購"
     else:
-        skip_dates[uid].add(target_date)
+        user_skips.add(target_date)
         action = f"已跳過 {day_label} 的自動訂購"
 
-    buttons = _build_skip_buttons(skip_dates[uid])
-    summary = _skip_summary(skip_dates[uid])
+    save_skip_dates(uid, user_skips)
+
+    buttons = _build_skip_buttons(user_skips)
+    summary = _skip_summary(user_skips)
     if summary:
         text = f"{action}\n\n目前已跳過：{summary}\n\n點選日期可切換跳過/取消跳過："
     else:
