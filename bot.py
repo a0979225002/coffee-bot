@@ -78,9 +78,8 @@ VERIFY_KEY, SET_NAME, CHOOSE_DRINK, CHOOSE_TEMP, CHOOSE_BEAN, CHOOSE_TIME, CONFI
 # 使用者資料存檔
 DATA_FILE = Path(__file__).parent / "users.json"
 
-# 今日跳過名單（記憶體內，每天重置）
-skip_today: set[str] = set()
-skip_date: str = ""
+# 跳過日期：{uid: set of "YYYY-MM-DD"}
+skip_dates: dict[str, set[str]] = {}
 
 
 logging.basicConfig(level=logging.INFO)
@@ -184,7 +183,7 @@ HELP_TEXT = (
     "所有指令：\n"
     "/order - 手動訂咖啡\n"
     "/auto - 設定每日自動訂購（含時間）\n"
-    "/skip - 今天跳過自動訂購，明天恢復\n"
+    "/skip - 選擇要跳過自動訂購的日期\n"
     "/status - 查看你的設定\n"
     "/who - 查看誰設了自動訂購\n"
     "/list - 查看所有使用者\n"
@@ -471,15 +470,89 @@ async def auto_choose_time(update: Update, context):
     return ConversationHandler.END
 
 
-async def skip_today_cmd(update: Update, context):
-    global skip_today, skip_date
-    today = date.today().isoformat()
-    if skip_date != today:
-        skip_today = set()
-        skip_date = today
+WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
+
+
+def get_next_workdays(count=5):
+    """取得未來 count 個工作日（週一到週五）"""
+    from datetime import timedelta
+    days = []
+    d = date.today()
+    while len(days) < count:
+        if d.weekday() < 5:  # 週一~週五
+            days.append(d)
+        d += timedelta(days=1)
+    return days
+
+
+async def skip_cmd(update: Update, context):
     uid = str(update.effective_user.id)
-    skip_today.add(uid)
-    await update.message.reply_text("好的，今天不幫你自動訂購。明天恢復正常。")
+    workdays = get_next_workdays(5)
+    user_skips = skip_dates.get(uid, set())
+
+    buttons = []
+    for d in workdays:
+        label = f"週{WEEKDAY_NAMES[d.weekday()]} {d.month}/{d.day}"
+        if d.isoformat() in user_skips:
+            label += " (已跳過)"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"skip:{d.isoformat()}")])
+
+    # 已跳過的日期提示
+    skipped = sorted([s for s in user_skips if s >= date.today().isoformat()])
+    if skipped:
+        from datetime import date as dt
+        skip_list = ", ".join(
+            f"週{WEEKDAY_NAMES[dt.fromisoformat(s).weekday()]} {dt.fromisoformat(s).month}/{dt.fromisoformat(s).day}"
+            for s in skipped
+        )
+        text = f"目前已跳過：{skip_list}\n\n點選日期可切換跳過/取消跳過："
+    else:
+        text = "點選要跳過自動訂購的日期："
+
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def skip_toggle(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    uid = str(query.from_user.id)
+    target_date = query.data.split(":", 1)[1]
+
+    if uid not in skip_dates:
+        skip_dates[uid] = set()
+
+    from datetime import date as dt
+    d = dt.fromisoformat(target_date)
+    day_label = f"週{WEEKDAY_NAMES[d.weekday()]} {d.month}/{d.day}"
+
+    if target_date in skip_dates[uid]:
+        skip_dates[uid].remove(target_date)
+        action = f"已恢復 {day_label} 的自動訂購"
+    else:
+        skip_dates[uid].add(target_date)
+        action = f"已跳過 {day_label} 的自動訂購"
+
+    # 重新產生按鈕
+    workdays = get_next_workdays(5)
+    user_skips = skip_dates[uid]
+    buttons = []
+    for wd in workdays:
+        label = f"週{WEEKDAY_NAMES[wd.weekday()]} {wd.month}/{wd.day}"
+        if wd.isoformat() in user_skips:
+            label += " (已跳過)"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"skip:{wd.isoformat()}")])
+
+    skipped = sorted([s for s in user_skips if s >= date.today().isoformat()])
+    if skipped:
+        skip_list = ", ".join(
+            f"週{WEEKDAY_NAMES[dt.fromisoformat(s).weekday()]} {dt.fromisoformat(s).month}/{dt.fromisoformat(s).day}"
+            for s in skipped
+        )
+        text = f"{action}\n\n目前已跳過：{skip_list}\n\n點選日期可切換跳過/取消跳過："
+    else:
+        text = f"{action}\n\n點選要跳過自動訂購的日期："
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def cancel_auto(update: Update, context):
@@ -546,13 +619,10 @@ async def status(update: Update, context):
 
 async def auto_order_for_user(uid: str, bot):
     """幫單一使用者自動訂咖啡"""
-    global skip_today, skip_date
     today = date.today().isoformat()
-    if skip_date != today:
-        skip_today = set()
-        skip_date = today
 
-    if uid in skip_today:
+    if uid in skip_dates and today in skip_dates[uid]:
+        skip_dates[uid].discard(today)  # 用完就移除
         try:
             await bot.send_message(chat_id=int(uid), text="今天已跳過自動訂購。")
         except Exception:
@@ -655,7 +725,8 @@ def main():
     app.add_handler(start_handler)
     app.add_handler(order_handler)
     app.add_handler(auto_handler)
-    app.add_handler(CommandHandler("skip", skip_today_cmd))
+    app.add_handler(CommandHandler("skip", skip_cmd))
+    app.add_handler(CallbackQueryHandler(skip_toggle, pattern=r"^skip:"))
     app.add_handler(CommandHandler("cancel_auto", cancel_auto))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("who", who))
@@ -685,7 +756,7 @@ def main():
         await application.bot.set_my_commands([
             BotCommand("order", "手動訂咖啡"),
             BotCommand("auto", "設定每日自動訂購"),
-            BotCommand("skip", "今天跳過自動訂購"),
+            BotCommand("skip", "選擇要跳過的日期"),
             BotCommand("status", "查看你的設定"),
             BotCommand("who", "查看誰設了自動訂購"),
             BotCommand("list", "查看所有使用者"),
