@@ -54,5 +54,12 @@ VERIFY_KEY, SET_NAME, CHOOSE_DRINK, CHOOSE_TEMP, CHOOSE_BEAN, CHOOSE_TIME, CONFI
 WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
 # --- Logger ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+# httpx 每 10 秒的 getUpdates 各記一行 INFO，佔掉九成以上 log 量，靜音
+logging.getLogger("httpx").setLevel(logging.WARNING)
+# 心跳 job 每分鐘執行一次，executor 的 INFO 會灌爆 log，靜音（WARNING 以上照記）
+logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
 logger = logging.getLogger("coffee-bot")

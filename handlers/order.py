@@ -1,3 +1,4 @@
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ConversationHandler
 from config import DRINKS, TEMPS, BEANS, CHOOSE_DRINK, CHOOSE_TEMP, CHOOSE_BEAN
@@ -30,7 +31,8 @@ async def choose_drink(update: Update, context):
         uid = str(query.from_user.id)
         users = load_users()
         name = users[uid]["name"]
-        ok, msg = submit_form(name, "Pass", "冰的", "")
+        # submit_form 是同步阻塞呼叫，丟進 thread 跑，避免卡住 event loop
+        ok, msg = await asyncio.to_thread(submit_form, name, "Pass", "冰的", "")
         if ok:
             await query.edit_message_text("好的，今天 Pass ☕")
         else:
@@ -70,7 +72,7 @@ async def choose_bean(update: Update, context):
     drink = context.user_data["drink"]
     temp = context.user_data["temp"]
 
-    ok, msg = submit_form(name, drink, temp, bean)
+    ok, msg = await asyncio.to_thread(submit_form, name, drink, temp, bean)
     if ok:
         await query.edit_message_text(f"已訂購！\n☕ {drink}\n🧊 {temp}\n🫘 {bean}")
     else:

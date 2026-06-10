@@ -9,7 +9,13 @@ from telegram.ext import (
 )
 from config import BOT_TOKEN, VERIFY_KEY, SET_NAME, CHOOSE_DRINK, CHOOSE_TEMP, CHOOSE_BEAN, CHOOSE_TIME, CONFIRM_OVERWRITE, logger
 from storage import load_users
-from scheduler import scheduler, update_user_schedule
+from scheduler import (
+    scheduler,
+    update_user_schedule,
+    setup_misfire_notifier,
+    setup_heartbeat,
+    setup_job_error_listener,
+)
 from handlers import (
     start, verify_key, set_name,
     order_start, choose_drink, choose_temp, choose_bean,
@@ -82,13 +88,14 @@ def main():
 
     # --- 排程 ---
 
-    app.bot_data["scheduler"] = scheduler
-
     users = load_users()
     for uid, user in users.items():
         if user.get("auto"):
             update_user_schedule(uid, user, app.bot)
 
+    setup_misfire_notifier(app.bot)
+    setup_job_error_listener()
+    setup_heartbeat()
     scheduler.start()
 
     # --- Telegram 指令選單 ---

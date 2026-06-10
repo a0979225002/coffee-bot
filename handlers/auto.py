@@ -119,7 +119,9 @@ async def auto_choose_time(update: Update, context):
         f"取消請用 /cancel_auto"
     )
 
-    update_user_schedule(uid, users[uid], query.bot)
+    # 注意：PTB 21 的 CallbackQuery 沒有 .bot 屬性，這裡一定要用 context.bot，
+    # 否則設定當下會丟 AttributeError，job 要等下次重啟才會掛上
+    update_user_schedule(uid, users[uid], context.bot)
     return ConversationHandler.END
 
 
@@ -129,10 +131,5 @@ async def cancel_auto(update: Update, context):
     if uid in users:
         users[uid]["auto"] = None
         save_users(users)
-    scheduler = context.bot_data.get("scheduler")
-    if scheduler:
-        job_id = f"auto_{uid}"
-        job = scheduler.get_job(job_id)
-        if job:
-            job.remove()
+        update_user_schedule(uid, users[uid], context.bot)
     await update.message.reply_text("已取消自動訂購。")
